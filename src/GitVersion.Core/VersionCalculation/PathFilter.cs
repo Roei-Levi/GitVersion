@@ -6,10 +6,9 @@ namespace GitVersion.VersionCalculation;
 
 internal class PathFilter(IGitRepository repository, GitVersionContext context, IEnumerable<string> paths) : IVersionFilter
 {
-    public enum PathFilterMode { Inclusive = 0, Exclusive = 1 }
-
-    private readonly IEnumerable<string> paths = paths.NotNull();
     private readonly GitVersionContext context = context;
+    private readonly List<Regex> pathsRegexes = paths.Select(path => new Regex(path, RegexOptions.IgnoreCase | RegexOptions.Compiled)).ToList();
+    private readonly Dictionary<string, bool> pathMatchCache = [];
 
     public bool Exclude(IBaseVersion baseVersion, out string? reason)
     {
@@ -31,10 +30,19 @@ internal class PathFilter(IGitRepository repository, GitVersionContext context, 
 
             if (patchPaths != null)
             {
-                if (this.paths.Any(path => patchPaths.All(p => Regex.IsMatch(p, path, RegexOptions.IgnoreCase))))
+                foreach (var path in patchPaths)
                 {
-                    reason = "Source was ignored due to commit path matching ignore regex";
-                    return true;
+                    if (!pathMatchCache.TryGetValue(path, out var isMatch))
+                    {
+                        isMatch = this.pathsRegexes.Any(regex => regex.IsMatch(path));
+                        pathMatchCache[path] = isMatch;
+                    }
+
+                    if (isMatch)
+                    {
+                        reason = "Source was ignored due to commit path matching ignore regex";
+                        return true;
+                    }
                 }
             }
         }
