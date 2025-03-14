@@ -16,9 +16,7 @@ internal abstract class MergeCommitOnTrunkBase : IIncrementer
            iteration: commit.ChildIteration!,
            targetLabel: context.TargetLabel,
            incrementStrategyFinder: context.IncrementStrategyFinder,
-           configuration: context.Configuration,
-           repository: context.Repository,
-           gitverContext: context.GitverContext
+           configuration: context.Configuration
        );
 
         context.Label ??= baseVersion.Operator?.Label;
