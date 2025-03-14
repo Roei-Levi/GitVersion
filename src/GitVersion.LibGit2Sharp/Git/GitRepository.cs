@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using GitVersion.Extensions;
 using GitVersion.Helpers;
 using LibGit2Sharp;
@@ -8,7 +8,7 @@ namespace GitVersion.Git;
 internal sealed partial class GitRepository
 {
     private Lazy<IRepository>? repositoryLazy;
-    private readonly Dictionary<string, Patch> patchCache = [];
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>?> patchPathsCache = new();
 
     private IRepository RepositoryInstance
     {
@@ -55,28 +55,37 @@ internal sealed partial class GitRepository
         });
     }
 
-    public IEnumerable<string>? FindPatchPaths(ICommit commit, string? tagPrefix)
+    public IReadOnlyList<string>? FindPatchPaths(ICommit commit, string? tagPrefix)
     {
-        Patch? patch = null;
-        var innerCommit = this.RepositoryInstance.Commits.First(c => c.Sha == commit.Sha);
-        var match = new Regex($"^({tagPrefix ?? ""}).*$", RegexOptions.Compiled);
+        ArgumentNullException.ThrowIfNull(commit);
 
-        if (!this.patchCache.ContainsKey(commit.Sha))
+        return patchPathsCache.GetOrAdd(commit.Sha, commitSha =>
         {
-            if (!this.RepositoryInstance.Tags.Any(t => t.Target.Sha == commit.Sha && match.IsMatch(t.FriendlyName)))
+            if (PatchPathsNeedsToBeDetermined(commitSha, tagPrefix))
             {
+                var innerCommit = this.RepositoryInstance.Commits.First(c => c.Sha == commitSha);
                 Tree commitTree = innerCommit.Tree; // Main Tree
                 Tree? parentCommitTree = innerCommit.Parents.FirstOrDefault()?.Tree; // Secondary Tree
-                patch = this.RepositoryInstance.Diff.Compare<Patch>(parentCommitTree, commitTree); // Difference
-                this.patchCache[commit.Sha] = patch;
+                Patch patch = this.RepositoryInstance.Diff.Compare<Patch>(parentCommitTree, commitTree); // Difference
+                return patch.Select(element => element.Path).ToList();
+            }
+            return null;
+        });
+    }
+
+    private bool PatchPathsNeedsToBeDetermined(string commitSha, string? tagPrefix)
+    {
+        if (!string.IsNullOrEmpty(tagPrefix))
+        {
+            foreach (var tag in this.RepositoryInstance.Tags.Where(element => element.Target.Sha == commitSha))
+            {
+                if (tag.FriendlyName.StartsWith(tagPrefix, StringComparison.InvariantCulture))
+                {
+                    return false;
+                }
             }
         }
-        else
-        {
-            patch = this.patchCache[commit.Sha];
-        }
-
-        return patch?.Select(p => p.Path);
+        return true;
     }
 
     public int UncommittedChangesCount()
